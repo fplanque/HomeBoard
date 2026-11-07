@@ -74,7 +74,8 @@ fun LauncherSettingsDialog(
     val toggle = remember { FocusRequester() }
     // The item last on, to come back to from the top row
     val items = remember { ListFocus() }
-    val itemKeys = if (advanced) listOf("hours-", "hours+", "memory") else listOf("catch", "reopen", "accessibility", "export", "import")
+    val itemKeys = if (advanced) listOf("hours-", "hours+", "memory") else listOf("default", "catch", "reopen", "accessibility", "export", "import")
+    var defaultHome by remember { mutableStateOf(context.defaultHome()) }
     val prefs = remember { LauncherPrefs(context) }
     // An option turned on, once its explanation is accepted
     var pendingOption by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -98,6 +99,7 @@ fun LauncherSettingsDialog(
             "“$serviceName” is on in $accessibility, but Android isn't running it, so Home opens " +
                 "the TV's own home screen. Turn it off and on again there; if it still doesn't run, restart the TV."
         autoTurnedOff -> "Switched off automatically: this launcher failed to start several times in a row."
+        defaultHome.isDefault -> "Off: Home opens this launcher anyway, as the TV's default home app."
         serviceOn ->
             "Off. “$serviceName” is still on in $accessibility but does nothing; you can turn it off there."
         else -> "Off: Home opens the TV's own home screen."
@@ -124,6 +126,13 @@ fun LauncherSettingsDialog(
             )
             return@TopDialog
         }
+        // First: where Android allows it, the one way that needs no Accessibility helper
+        DefaultHomeOption(
+            state = defaultHome,
+            onStateChange = { defaultHome = it },
+            modifier = Modifier.padding(start = 12.dp, top = 12.dp, end = 12.dp).focusRequester(toggle).then(items.row("default")).ringToTop(),
+        )
+        MenuDivider()
         HomeOption(
             title = "Catch the Home button",
             description = "Opens at once. May stop the volume from changing continuously while you hold a volume button.",
@@ -131,7 +140,7 @@ fun LauncherSettingsDialog(
             onClick = {
                 if (catchHomeKey) onCatchHomeKeyChange(false) else turnOn { onCatchHomeKeyChange(true) }
             },
-            modifier = Modifier.padding(start = 12.dp, top = 12.dp, end = 12.dp).focusRequester(toggle).then(items.row("catch")).ringToTop(),
+            modifier = Modifier.padding(horizontal = 12.dp).then(items.row("catch")).ringToTop(),
         )
         HomeOption(
             title = "Reopen after the TV's home screen",

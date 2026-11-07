@@ -118,9 +118,11 @@ fun Context.openSystemSettings(action: String = Settings.ACTION_SETTINGS) {
 
 /**
  * Whether the TV's Settings app has this screen. Some TVs answer screens they lack with a
- * placeholder that only says no app can open it, e.g. Sony for Accessibility.
+ * placeholder that only says no app can open it, e.g. Sony for Accessibility, or with an empty
+ * screen of their own, e.g. Sony's `EmptyStubActivity` for Home app on the Living Room TV.
  */
 fun Context.hasSettingsScreen(action: String): Boolean {
     val handler = packageManager.resolveActivity(Intent(action), PackageManager.MATCH_DEFAULT_ONLY) ?: return false
-    return !handler.activityInfo.packageName.endsWith(".frameworkpackagestubs")
+    return !handler.activityInfo.packageName.endsWith(".frameworkpackagestubs") &&
+        !handler.activityInfo.name.endsWith(".EmptyStubActivity")
 }

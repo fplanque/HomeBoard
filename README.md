@@ -57,7 +57,7 @@ Use the name of the file you downloaded in place of `HomeBoard.apk`.
 
 ### Afterwards
 
-HomeBoard appears in your TV's apps. To make the Home button open it, go to the cog → HomeBoard settings, choose how it should take over, and turn on **HomeBoard Helper** in your TV's Accessibility settings. The helper is optional, and if HomeBoard fails to start a few times in a row, it switches itself off.
+HomeBoard appears in your TV's apps. To make the Home button open it, go to the cog → HomeBoard settings. Where Android allows it, choose **Make HomeBoard the default home app**. Most Android TV and Google TV sets don't allow it, because their own home screen always comes first; the option then says why. Otherwise, choose how HomeBoard should take over, and turn on **HomeBoard Helper** in your TV's Accessibility settings. The helper is optional, and if HomeBoard fails to start a few times in a row, it switches itself off.
 
 To update, install a newer APK the same way. Your settings stay in place.
 
