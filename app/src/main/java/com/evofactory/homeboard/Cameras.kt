@@ -559,7 +559,7 @@ fun CamerasDialog(
     // The camera last selected: the top row comes back to it
     fun currentItem() = when (tab) {
         CamerasTab.List -> rows.currentOrNull(cameras.map { it.id })
-        CamerasTab.Screensaver -> advancedItems.current(listOf("shorter", "longer") + cameras.map { "screensaver:${it.id}" } + "progress")
+        CamerasTab.Screensaver -> advancedItems.current(listOf("shorter", "longer") + cameras.map { "screensaver:${it.id}" } + listOf("progress", "delay-", "delay+"))
         CamerasTab.Advanced -> advancedItems.current(listOf("substreams", "minimize"))
     }
 
@@ -653,6 +653,10 @@ fun CamerasDialog(
                 cameraModifier = { index ->
                     advancedItems.row("screensaver:${cameras[index].id}").ringToTop(left = index == 0, right = index == cameras.lastIndex)
                 },
+                shorterDelayModifier = advancedItems.row("delay-").ringToTop(right = false),
+                longerDelayModifier = advancedItems.row("delay+").ringToTop(left = false),
+                // Alone in its row until allowed
+                allowDelayModifier = advancedItems.row("delay-").ringToTop(),
             )
             return@TopDialog
         }

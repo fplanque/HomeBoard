@@ -26,6 +26,10 @@
     <!-- Continue watching: reads what other apps publish to Android's Watch Next list -->
     <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
 
+    <!-- Screensaver tab: changes how long the TV waits without input before its screensaver, once the
+         user allows it in the TV's "Modify system settings" -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" />
+
     <!-- Android 11+ hides other apps unless we declare which ones we look up -->
     <queries>
         <intent>
@@ -52,6 +56,11 @@
         </intent>
         <intent>
             <action android:name="com.google.android.tv.settings.ambient" />
+        </intent>
+        <!-- and the screen that allows it to change when the screensaver starts -->
+        <intent>
+            <action android:name="android.settings.action.MANAGE_WRITE_SETTINGS" />
+            <data android:scheme="package" />
         </intent>
     </queries>
 
