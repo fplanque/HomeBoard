@@ -6,9 +6,12 @@ import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import java.io.IOException
+import java.net.InetAddress
+import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.CertificateException
@@ -19,6 +22,10 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import org.conscrypt.Conscrypt
 import javax.net.ssl.SSLException
+import javax.net.ssl.SSLEngine
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509ExtendedTrustManager
 import javax.net.ssl.X509TrustManager
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -123,26 +130,74 @@ fun normalizeFrigateUrl(input: String): String? {
 }
 
 /**
- * Accepts the certificate pinned, or with no pin, any: the first connection is made from the
- * settings, by someone who knows this is their server. It remembers what it saw for saving as the pin.
+ * Accepts a certificate the system trusts for the address used, as with a real one (e.g. Let's
+ * Encrypt): it may be renewed at any time. Otherwise only the one pinned, since Frigate's own is
+ * self-signed and nothing else can vouch for it; with no pin, any, as the first connection is made
+ * from the settings by someone who knows this is their server. It remembers what it saw for saving
+ * as the pin, and a certificate refused for not being the pinned one in [offered].
  */
-private class PinningTrustManager(private val pin: String) : X509TrustManager {
+private class PinningTrustManager(private val pin: String) : X509ExtendedTrustManager() {
     @Volatile var seen = ""
     @Volatile var changed = false
+    @Volatile var offered = ""
 
-    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String?) {
+    private val system: X509TrustManager? = runCatching {
+        TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+            .apply { init(null as KeyStore?) }
+            .trustManagers.filterIsInstance<X509TrustManager>().first()
+    }.onFailure { AppLog.w("Frigate", "No system trust store", it) }.getOrNull()
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String?, socket: Socket?) =
+        check(chain, (socket as? SSLSocket)?.handshakeSession?.peerHost) {
+            (system as? X509ExtendedTrustManager)?.checkServerTrusted(chain, authType, socket) ?: system?.checkServerTrusted(chain, authType)
+        }
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String?, engine: SSLEngine?) =
+        check(chain, engine?.handshakeSession?.peerHost ?: engine?.peerHost) {
+            (system as? X509ExtendedTrustManager)?.checkServerTrusted(chain, authType, engine) ?: system?.checkServerTrusted(chain, authType)
+        }
+
+    override fun checkServerTrusted(chain: Array<out X509Certificate>, authType: String?) =
+        check(chain, null) { system?.checkServerTrusted(chain, authType) }
+
+    private fun check(chain: Array<out X509Certificate>, host: String?, systemCheck: () -> Unit) {
         val certificate = chain.firstOrNull() ?: throw CertificateException("No certificate")
         val fingerprint = MessageDigest.getInstance("SHA-256").digest(certificate.encoded).joinToString("") { "%02x".format(it) }
-        if (pin.isNotEmpty() && fingerprint != pin) {
+        val trusted = pin.isEmpty() || fingerprint == pin ||
+            (system != null && host != null && certificateNames(certificate, host) && runCatching(systemCheck).isSuccess)
+        if (!trusted) {
+            offered = fingerprint
             changed = true
-            throw CertificateException("Not the certificate this TV knows")
+            throw CertificateException("Not the certificate this TV knows, and not one the system trusts for $host")
         }
         seen = fingerprint
     }
 
     override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String?) = throw CertificateException()
+    override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String?, socket: Socket?) = throw CertificateException()
+    override fun checkClientTrusted(chain: Array<out X509Certificate>, authType: String?, engine: SSLEngine?) = throw CertificateException()
 
     override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+}
+
+/** Whether [certificate] is for [host], by its subject alternative names: a DNS name, with a wildcard for one leftmost label, or an IP address */
+internal fun certificateNames(certificate: X509Certificate, host: String): Boolean {
+    val names = runCatching { certificate.subjectAlternativeNames }.getOrNull() ?: return false
+    val wanted = host.trimEnd('.').lowercase()
+    val isAddress = wanted.contains(':') || wanted.all { it.isDigit() || it == '.' }
+    return names.any { entry ->
+        val type = entry.getOrNull(0) as? Int
+        val name = (entry.getOrNull(1) as? String)?.trimEnd('.')?.lowercase() ?: return@any false
+        when {
+            isAddress -> type == 7 && runCatching { InetAddress.getByName(name) == InetAddress.getByName(wanted) }.getOrDefault(false)
+            type != 2 -> false
+            name.startsWith("*.") -> {
+                val suffix = name.substring(1)
+                wanted.endsWith(suffix) && wanted.length > suffix.length && '.' !in wanted.substring(0, wanted.length - suffix.length)
+            }
+            else -> name == wanted
+        }
+    }
 }
 
 /** Talks to one Frigate: logs in when it's asked to, including for the video player, which shares [http]. */
@@ -157,6 +212,9 @@ class FrigateClient(private val server: FrigateServer) {
     /** The certificate of the last connection, to save as the server's [FrigateServer.certPin] */
     val seenCertPin: String get() = trust.seen
 
+    /** A certificate refused for not being the one pinned, nor one the system trusts: to accept, or not */
+    val changedCertPin: String? get() = trust.offered.takeIf { trust.changed }
+
     val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(FRIGATE_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         .readTimeout(FRIGATE_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -164,7 +222,8 @@ class FrigateClient(private val server: FrigateServer) {
             frigateSslContext().apply { init(null, arrayOf(trust), SecureRandom()) }.socketFactory,
             trust,
         )
-        // A self-signed certificate rarely names the address it's reached at: the pin identifies it
+        // A self-signed certificate rarely names the address it's reached at: the pin identifies it.
+        // The trust manager checks the names of one the system trusts
         .hostnameVerifier { _, _ -> true }
         .addInterceptor { chain ->
             val current = token
@@ -223,7 +282,7 @@ class FrigateClient(private val server: FrigateServer) {
     private fun isUnreachable(e: IOException) = e is UnknownHostException || e is SocketException || e is SocketTimeoutException
 
     private fun failureText(e: IOException): String = when {
-        trust.changed -> "Frigate's certificate changed. If you renewed it, press Connect in the Frigate settings to accept it."
+        trust.changed -> "Frigate's certificate changed: accept the new one only if you know it was renewed or replaced."
         e is UnknownHostException -> "Unknown address: ${server.url}"
         isUnreachable(e) -> "Can't reach Frigate at ${server.url}"
         e is SSLException -> "HTTPS problem: ${e.message}"

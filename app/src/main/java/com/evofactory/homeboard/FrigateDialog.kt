@@ -25,7 +25,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Frigate settings: the address and login, saved once they work. Connecting from here also accepts
- * the certificate Frigate shows: it's self-signed, and the TV then only trusts that one. After a
+ * the certificate Frigate shows, as its own is self-signed: the TV then trusts only that one, or one
+ * the system trusts for the address, which can be renewed without asking. After a
  * failed attempt, closing still saves what's in the form, so it needn't be typed again with a remote.
  */
 @Composable
@@ -160,3 +161,47 @@ fun FrigateDialog(
         LaunchedEffect(Unit) { (if (canConnect) connectButton else urlField).requestFocus() }
     }
 }
+
+/**
+ * Frigate showed a certificate that isn't the one this TV pinned, nor one the system trusts for its
+ * address. Accept pins the new one and carries on with the saved login; Log in again opens the
+ * Frigate settings, whose Connect also accepts it. Opens by itself, once for each new certificate.
+ */
+@Composable
+fun FrigateCertificateDialog(
+    server: FrigateServer,
+    offered: String,
+    onAccept: () -> Unit,
+    onLogIn: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val accept = remember { FocusRequester() }
+    TopDialog(
+        title = "Frigate certificate changed",
+        onDismiss = onDismiss,
+        buttons = listOf(
+            DialogButton("Accept", primary = true, focus = accept) {
+                onAccept()
+                onDismiss()
+            },
+            DialogButton("Log in again") {
+                onDismiss()
+                onLogIn()
+            },
+        ),
+    ) {
+        listOf(
+            "Frigate at ${server.url} shows a different certificate from the one this TV trusts, so alerts have stopped.",
+            "That's expected if its certificate was renewed or replaced. If nobody changed it, something else may be " +
+                "answering in Frigate's place: close this, and accepting the new certificate would send it the password.",
+            "Trusted: ${formatFingerprint(server.certPin)}",
+            "Now: ${formatFingerprint(offered)}",
+        ).forEach {
+            Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+        }
+        LaunchedEffect(Unit) { runCatching { accept.requestFocus() } }
+    }
+}
+
+/** A SHA-256 fingerprint in groups of 4 hex digits, as the iPad app shows it */
+fun formatFingerprint(hex: String): String = hex.chunked(4).joinToString(" ")

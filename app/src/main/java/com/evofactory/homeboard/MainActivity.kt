@@ -82,6 +82,8 @@ class MainActivity : ComponentActivity() {
     private var haDisplay by mutableStateOf(HaDisplay())
     private var frigate by mutableStateOf(FrigateServer())
     private var frigateOpen by mutableStateOf(false)
+    // The changed certificate whose dialog was closed: it doesn't open again for that one
+    private var dismissedCertificate by mutableStateOf<String?>(null)
     private var launcherSettingsOpen by mutableStateOf(false)
     private var stuckPlayersOpen by mutableStateOf(false)
     private var replaceHome by mutableStateOf(false)
@@ -339,7 +341,8 @@ class MainActivity : ComponentActivity() {
                         } else if (tab == HomeTab.Alerts) {
                             FrigateAlertsGrid(
                                 feed = frigateFeed,
-                                onSetUp = { frigateOpen = true },
+                                // A changed certificate: its dialog again
+                                onSetUp = { if (frigateFeed?.changedCertificate != null) dismissedCertificate = null else frigateOpen = true },
                                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = EdgePadding),
                             )
                         } else if (tab == HomeTab.Assistant) {
@@ -593,6 +596,16 @@ class MainActivity : ComponentActivity() {
                             onLogOut = ::logOutOfHa,
                             onDiscardLogin = ::revokeHaLogin,
                             onDismiss = { haDialogOpen = false },
+                        )
+                    }
+                    val changedCertificate = frigateFeed?.changedCertificate
+                    if (changedCertificate != null && changedCertificate != dismissedCertificate && !frigateOpen) {
+                        FrigateCertificateDialog(
+                            server = frigate,
+                            offered = changedCertificate,
+                            onAccept = { saveFrigate(frigate.copy(certPin = changedCertificate)) },
+                            onLogIn = { frigateOpen = true },
+                            onDismiss = { dismissedCertificate = changedCertificate },
                         )
                     }
                     if (frigateOpen) {

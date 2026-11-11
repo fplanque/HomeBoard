@@ -113,6 +113,9 @@ class FrigateFeed(val client: FrigateClient) {
 
     // Refused login or changed certificate: only the settings can fix it
     var settingsNeeded by mutableStateOf(false)
+
+    // A certificate refused for not being the one this TV knows: the dialog offers to accept it
+    var changedCertificate by mutableStateOf<String?>(null)
     var playing by mutableStateOf<FrigateAlert?>(null)
 
     // For the network status: when a query last worked, and how many failed since
@@ -165,6 +168,7 @@ fun rememberFrigateFeed(server: FrigateServer, onCertificateAccepted: (String) -
                     feed.error = e.message
                     feed.failedQueries++
                     feed.settingsNeeded = e.stopRetrying
+                    feed.changedCertificate = feed.client.changedCertPin
                     // Asking again with a refused login could get it locked out
                     if (e.stopRetrying) break
                     if (e.unreachable) nextTry = ALERTS_UNREACHABLE_RETRY_MS
@@ -219,7 +223,7 @@ fun FrigateAlertsGrid(feed: FrigateFeed?, onSetUp: () -> Unit, modifier: Modifie
     val shown = feed.alerts
     val problem = feed.error
     when {
-        feed.settingsNeeded -> SettingsPrompt(problem, "Open Frigate settings", onSetUp, modifier)
+        feed.settingsNeeded -> SettingsPrompt(problem, if (feed.changedCertificate != null) "Review the certificate" else "Open Frigate settings", onSetUp, modifier)
         shown == null -> AlertsMessage(problem ?: "Loading alerts…", modifier, isError = problem != null)
         shown.isEmpty() && problem == null -> AlertsMessage("No alerts in the last $ALERTS_WITHIN_DAYS days", modifier)
         else -> Column(modifier = modifier) {
