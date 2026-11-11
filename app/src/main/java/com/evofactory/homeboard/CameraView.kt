@@ -206,6 +206,9 @@ private class ConnectionStatus(val cameraHost: String) {
     /** Before connecting: other players are still releasing their decoders */
     var waitingForDecoders by mutableStateOf(false)
 
+    /** Seconds behind live while that's abnormal (see [LagMeter]), else null */
+    var lag by mutableStateOf<Float?>(null)
+
     val live get() = phase == Phase.Live
 
     /** Something went wrong, rather than only still connecting */
@@ -213,6 +216,7 @@ private class ConnectionStatus(val cameraHost: String) {
 
     fun reset(phase: Phase) {
         this.phase = phase
+        lag = null
         lostAt = null
         retries = 0
         cameraAnswered = null
@@ -375,6 +379,9 @@ fun CameraView(
                 if (showProgress || status.failing) CameraStatus(status, snapshot?.takenAt)
                 NotLiveMark(Modifier.align(Alignment.BottomEnd).padding(16.dp), size = 36.dp)
             }
+        }
+        status.lag?.takeIf { status.live }?.let { lag ->
+            LagLabel(lag, compact, Modifier.align(Alignment.TopEnd).padding(if (compact) 6.dp else 12.dp))
         }
         // The hardware video layer ignores clipping: its corners are painted over in the background colour
         if (rounded) {
@@ -594,6 +601,9 @@ private class CameraConnection(
     }
 
     private val logId = Integer.toHexString(url.hashCode()).takeLast(4)
+    private val lagMeter = LagMeter()
+    private var lagChecksOver = 0
+    private var lagWorst = 0f
     private var quietRetries = 0
     private var released = false
     private var playerWatch = PlayerWatch(player, "Player $logId")
@@ -707,6 +717,9 @@ private class CameraConnection(
             AppLog.i(TAG, "Player $logId picture on a new surface")
         } else {
             AppLog.i(TAG, "Player $logId live after ${SystemClock.elapsedRealtime() - attemptStartedAt} ms")
+            // A new player starts live
+            lagMeter.reset()
+            lagChecksOver = 0
         }
         quietRetries = 0
         status.reset(Phase.Live)
@@ -750,6 +763,7 @@ private class CameraConnection(
      */
     private fun lose(reason: String, unreachable: Boolean, stalledFor: Long = 0, retryDelay: Long? = null) {
         if (status.phase != Phase.Live && status.phase != Phase.Connecting) return
+        status.lag = null
         val now = SystemClock.elapsedRealtime()
         // It reached the camera and still lost the picture. Otherwise, the next try can use it again
         if (status.live || status.cameraAnswered != null) needsNewPlayer = true
@@ -809,6 +823,29 @@ private class CameraConnection(
         nextSnapshotAt = if (settled) now + snapshotInterval else liveAt + SETTLED_SNAPSHOT_DELAY_MS
     }
 
+    /** Every check while live: shows the lag once it's held above [LagMeter.SHOW_S], and logs it */
+    private fun checkLag(now: Long) {
+        val lag = lagMeter.add(player.currentPosition, now)
+        val shown = status.lag
+        when {
+            shown != null && lag < LagMeter.HIDE_S -> {
+                AppLog.i(TAG, "Player $logId caught up, after being up to ${String.format(java.util.Locale.ROOT, "%.1f", lagWorst)} s behind live")
+                status.lag = null
+                lagChecksOver = 0
+            }
+            shown != null -> {
+                if (kotlin.math.abs(lag - shown) >= 0.1f) status.lag = lag
+                lagWorst = kotlin.math.max(lagWorst, lag)
+            }
+            lag >= LagMeter.SHOW_S -> if (++lagChecksOver >= 2) {
+                status.lag = lag
+                lagWorst = lag
+                AppLog.w(TAG, "Player $logId is ${String.format(java.util.Locale.ROOT, "%.1f", lag)} s behind live")
+            }
+            else -> lagChecksOver = 0
+        }
+    }
+
     private fun check() {
         // Keep close to live: speed up while too much is buffered
         val behind = player.bufferedPosition - player.currentPosition
@@ -822,6 +859,7 @@ private class CameraConnection(
             Phase.Live -> {
                 // Watchdog: a camera that stops sending raises no error, the last frame just stays on screen
                 checkBlackPicture(now)
+                checkLag(now)
                 val frames = renderedFrames()
                 if (frames != lastFrames) {
                     lastFrames = frames
