@@ -12,7 +12,7 @@ Website: https://www.evofactory.com/homeboard/
 - **Continue Watching:** what you started in the last two weeks comes first. Apps decide what they share with the TV, so this varies from one app, and one TV, to the next.
 - **App row:** move tiles, hide them, see app info or uninstall.
 - **Home button helper:** optionally makes the Home button bring you to HomeBoard.
-- **TV to TV:** send your settings to another TV on your network.
+- **TV to TV:** send your settings to another TV on your network, or type its address to reach one on another network.
 - **Diagnostics:** a built-in ping tool, network status, and debug logs with logins and tokens stripped out.
 
 Cameras, Home Assistant and Frigate are all optional. Without them, HomeBoard is the most minimalistic launcher ever: your apps, and you need to scroll down to see Continue Watching.
