@@ -169,12 +169,16 @@ private fun sections(file: SettingsFile) = listOf(
     Section(
         "Home Assistant login",
         listOfNotNull(
-            file.login?.let { Row(LOGIN_KEY, Uri.parse(it.url).host ?: it.url, file.username.ifEmpty { "Access token" }) },
+            // Which account the login is for: one made with a long-lived access token has no username
+            file.login?.let { Row(LOGIN_KEY, Uri.parse(it.url).host ?: it.url, if (file.username.isEmpty()) "Account: none, an access token" else "Account: ${file.username}") },
         ),
     ),
     Section("Home Assistant sensors", file.sensors.map { Row("sensor:${it.id}", it.name, it.id) }),
     Section("Home Assistant actions", file.actions.map { Row("action:${it.id}", it.name, it.id) }),
-    Section("Frigate login", listOfNotNull(file.frigate?.let { Row(FRIGATE_KEY, Uri.parse(it.url).host ?: it.url, it.username) })),
+    Section(
+        "Frigate login",
+        listOfNotNull(file.frigate?.let { Row(FRIGATE_KEY, Uri.parse(it.url).host ?: it.url, if (it.username.isEmpty()) "Account: none" else "Account: ${it.username}") }),
+    ),
     // One line: the order only means something as a whole
     Section(
         "App tiles",
