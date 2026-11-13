@@ -175,6 +175,8 @@ fun rememberFrigateFeed(server: FrigateServer, onCertificateAccepted: (String) -
     LaunchedEffect(feed, feed.playing == null) {
         if (feed.playing != null) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            // Each start reads Frigate's pre_capture and post_capture again
+            feed.client.forgetCaptureTimes()
             while (true) {
                 var nextTry = ALERTS_REFRESH_MS
                 val requested = feed.refreshRequests.value
@@ -193,7 +195,7 @@ fun rememberFrigateFeed(server: FrigateServer, onCertificateAccepted: (String) -
                             AppLog.i("Frigate", "Version ${feed.version}")
                         } catch (_: FrigateException) {
                         }
-                        // Before a clip asks for them: once per connection
+                        // Before a clip asks for them: once per start
                         feed.client.loadCaptureTimes()
                     }
                     // One at a time: if the login stops working, it's only tried once

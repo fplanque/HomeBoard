@@ -439,12 +439,17 @@ class FrigateClient(private val server: FrigateServer) {
     }
 
     // Each camera's capture times, read once from Frigate's configuration, by "alert/driveway"
-    private var captureTimes: Map<String, FrigateCapture>? = null
+    @Volatile private var captureTimes: Map<String, FrigateCapture>? = null
+
+    /** Frigate's configuration may have changed: read it again on the next clip or query */
+    fun forgetCaptureTimes() {
+        captureTimes = null
+    }
     private val captureLock = Mutex()
 
     /**
      * Reads each camera's `record.alerts` and `record.detections` `pre_capture` and `post_capture`
-     * from Frigate's configuration, once; an account that can't read it gets Frigate's default, 5 s.
+     * from Frigate's configuration, once per start (see [forgetCaptureTimes]); an account that can't read it gets Frigate's default, 5 s.
      */
     suspend fun loadCaptureTimes(): Map<String, FrigateCapture> = captureLock.withLock {
         captureTimes ?: try {
