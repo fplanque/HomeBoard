@@ -181,12 +181,6 @@ private val CardFadeBottom = CardPeek * 2
  */
 private class CardWindow(val scroll: ScrollState, val height: Int, val fadeTop: Int, val fadeBottom: Int, val top: Int)
 
-// The views' names sit this much higher than the tab's content: right under the top bar's tabs
-private val ViewRowLift = EdgePadding
-
-// Shorter than the top bar's tabs, so the two rows sit close
-private val ViewRowHeight = 32.dp
-
 // Narrower and the names get cut: about 3 columns on a TV
 private val MinCardWidth = 280.dp
 
@@ -289,27 +283,15 @@ fun HaAssistantTab(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (views.size > 1) {
-            Row(
-                Modifier
-                    // Just under the top bar's tabs, rather than the whole margin below
-                    .layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints)
-                        val lift = ViewRowLift.roundToPx()
-                        layout(placeable.width, placeable.height - lift) { placeable.place(0, -lift) }
-                    }
-                    .padding(start = inset, end = inset, bottom = 4.dp)
-                    .height(ViewRowHeight),
-            ) {
-                views.forEachIndexed { index, view ->
-                    TabButton(
-                        view.title,
-                        selected = index == viewIndex,
-                        onSelect = { viewIndex = index },
-                        secondary = true,
-                        modifier = Modifier.focusRequester(viewTabs[index]).focusProperties { up = tabFocus },
-                    )
-                }
-            }
+            SubTabRow(
+                titles = views.map { it.title },
+                selected = viewIndex,
+                onSelect = { viewIndex = it },
+                inset = inset,
+                // 16 in all to the cards, with the column's 8
+                below = 8.dp,
+                itemModifier = { index -> Modifier.focusRequester(viewTabs[index]).focusProperties { up = tabFocus } },
+            )
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
             // Into the margin below, unless over the status line or at the screen's edge already

@@ -7,6 +7,7 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +40,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -122,6 +124,9 @@ class FrigateFeed(val client: FrigateClient) {
     var lastQueryAt by mutableStateOf<Long?>(null)
     var failedQueries by mutableIntStateOf(0)
 
+    // Frigate's version, asked once after the first query that worked
+    var version by mutableStateOf<String?>(null)
+
     // The live connection: when it was made, or else why there's none
     var socketConnectedAt by mutableStateOf<Long?>(null)
     var socketProblem by mutableStateOf<String?>(null)
@@ -131,6 +136,33 @@ class FrigateFeed(val client: FrigateClient) {
 
     // The alert watched last, for the list on screen to select once the player has closed
     var returnTo by mutableStateOf<String?>(null)
+
+    // The Clips tab's other lists, newest first, asked for while they show; null until Frigate answered
+    var detections by mutableStateOf<List<FrigateAlert>?>(null)
+    var exports by mutableStateOf<List<FrigateAlert>?>(null)
+
+    // Why the last asking for one of them failed
+    var listErrors by mutableStateOf(emptyMap<FrigateKind, String>())
+
+    fun list(kind: FrigateKind): List<FrigateAlert>? = when (kind) {
+        FrigateKind.Alert -> alerts
+        FrigateKind.Detection -> detections
+        FrigateKind.Export -> exports
+    }
+
+    fun error(kind: FrigateKind): String? = if (kind == FrigateKind.Alert) error else listErrors[kind]
+
+    /** Asks Frigate for the detections or the saved clips; the alerts follow on their own */
+    suspend fun load(kind: FrigateKind) {
+        if (kind == FrigateKind.Alert || settingsNeeded) return
+        try {
+            val list = if (kind == FrigateKind.Detection) client.reviews(kind) else client.exports()
+            if (kind == FrigateKind.Detection) detections = list else exports = list
+            listErrors = listErrors - kind
+        } catch (e: FrigateException) {
+            listErrors = listErrors + (kind to (e.message ?: "Frigate didn't answer"))
+        }
+    }
 }
 
 /** Null while Frigate isn't set up */
@@ -154,6 +186,16 @@ fun rememberFrigateFeed(server: FrigateServer, onCertificateAccepted: (String) -
                     feed.failedQueries = 0
                     if (server.certPin.isEmpty() && feed.client.seenCertPin.isNotEmpty()) onCertificateAccepted(feed.client.seenCertPin)
                     feed.settingsNeeded = false
+                    if (feed.version == null) {
+                        // Only for the settings: alerts carry on without it (the exception logs itself)
+                        try {
+                            feed.version = feed.client.version().takeIf { it.isNotEmpty() }
+                            AppLog.i("Frigate", "Version ${feed.version}")
+                        } catch (_: FrigateException) {
+                        }
+                        // Before a clip asks for them: once per connection
+                        feed.client.loadCaptureTimes()
+                    }
                     // One at a time: if the login stops working, it's only tried once
                     for (alert in latest) {
                         // A newer list is waiting
@@ -213,38 +255,157 @@ fun rememberFrigateFeed(server: FrigateServer, onCertificateAccepted: (String) -
     return feed
 }
 
-/** The latest Frigate alerts on two rows that scroll sideways, newest first. OK plays an alert's clip. */
+/**
+ * The Clips tab: Frigate's latest alerts, its detections, or the clips saved in Frigate (its
+ * exports), chosen in a row under the top bar's tabs when more than one of [kinds] is on, each on
+ * two rows that scroll sideways, newest first. Saved clips filed in cases get a row per case, each
+ * titled. OK plays a clip.
+ */
 @Composable
-fun FrigateAlertsGrid(feed: FrigateFeed?, onSetUp: () -> Unit, modifier: Modifier = Modifier) {
+fun FrigateClipsTab(
+    feed: FrigateFeed?,
+    kinds: List<FrigateKind>,
+    kind: FrigateKind,
+    onKindChange: (FrigateKind) -> Unit,
+    onSetUp: () -> Unit,
+    tabFocus: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
     if (feed == null) {
         SettingsPrompt(null, "Set up Frigate", onSetUp, modifier)
         return
     }
-    val shown = feed.alerts
-    val problem = feed.error
-    when {
-        feed.settingsNeeded -> SettingsPrompt(problem, if (feed.changedCertificate != null) "Review the certificate" else "Open Frigate settings", onSetUp, modifier)
-        shown == null -> AlertsMessage(problem ?: "Loading alerts…", modifier, isError = problem != null)
-        shown.isEmpty() && problem == null -> AlertsMessage("No alerts in the last $ALERTS_WITHIN_DAYS days", modifier)
-        else -> Column(modifier = modifier) {
-            if (problem != null) {
-                Text(
-                    problem,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ErrorColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = EdgePadding, end = EdgePadding, bottom = PanelItemSpacing),
-                )
+    if (feed.settingsNeeded) {
+        SettingsPrompt(feed.error, if (feed.changedCertificate != null) "Review the certificate" else "Open Frigate settings", onSetUp, modifier)
+        return
+    }
+    // Asked again every 30 s while it shows, like the alerts
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(feed, kind) {
+        if (kind == FrigateKind.Alert) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                feed.load(kind)
+                delay(ALERTS_REFRESH_MS)
             }
-            TwoRowGrid(
-                items = shown,
-                key = { it.id },
-                onSelect = { feed.playing = it },
-                selectKey = feed.returnTo,
-                onSelected = { feed.returnTo = null },
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            ) { alert -> AlertTile(feed.client, alert, hasNoVideo = alert.id in feed.noVideo) }
+        }
+    }
+    val kindTabs = remember(kinds.size) { List(kinds.size) { FocusRequester() } }
+    Column(
+        modifier = modifier
+            // Down from the top bar lands on the lists' names, which are to one side, rather than on a tile
+            .focusProperties {
+                onEnter = {
+                    if (kinds.size > 1 && requestedFocusDirection == FocusDirection.Down) {
+                        kindTabs.getOrNull(kinds.indexOf(kind))?.requestFocus()
+                    }
+                }
+            }
+            .focusGroup(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (kinds.size > 1) {
+            SubTabRow(
+                titles = kinds.map { it.title },
+                selected = kinds.indexOf(kind).coerceAtLeast(0),
+                onSelect = { onKindChange(kinds[it]) },
+                inset = EdgePadding,
+                // Room to move to a name without landing on a tile: 20 in all, with the column's 8
+                below = 12.dp,
+                itemModifier = { index -> Modifier.focusRequester(kindTabs[index]).focusProperties { up = tabFocus } },
+            )
+        }
+        val shown = feed.list(kind)
+        val problem = feed.error(kind)
+        val content = Modifier.weight(1f).fillMaxWidth()
+        when {
+            shown == null -> AlertsMessage(problem ?: "Loading…", content, isError = problem != null)
+            shown.isEmpty() && problem == null -> AlertsMessage(emptyText(kind), content)
+            else -> Column(modifier = content) {
+                if (problem != null) {
+                    Text(
+                        problem,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ErrorColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = EdgePadding, end = EdgePadding, bottom = PanelItemSpacing),
+                    )
+                }
+                if (kind == FrigateKind.Export && shown.any { it.caseName != null }) {
+                    CaseRows(feed, shown, Modifier.weight(1f).fillMaxWidth())
+                } else {
+                    TwoRowGrid(
+                        items = shown,
+                        key = { it.id },
+                        onSelect = { feed.playing = it },
+                        selectKey = feed.returnTo,
+                        onSelected = { feed.returnTo = null },
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                    ) { alert -> AlertTile(feed.client, alert, hasNoVideo = alert.id in feed.noVideo) }
+                }
+            }
+        }
+    }
+}
+
+private fun emptyText(kind: FrigateKind) = when (kind) {
+    FrigateKind.Alert -> "No alerts in the last $ALERTS_WITHIN_DAYS days"
+    FrigateKind.Detection -> "No detections in the last $ALERTS_WITHIN_DAYS days"
+    FrigateKind.Export -> "No clips saved in Frigate. Clips exported in Frigate's Export page show here."
+}
+
+/**
+ * Saved clips by case, one row per case that scrolls sideways, each titled with the case's name;
+ * those in no case first, without a title. The rows scroll up and down, two showing at a time.
+ */
+@Composable
+private fun CaseRows(feed: FrigateFeed, clips: List<FrigateAlert>, modifier: Modifier) {
+    // Runs of clips in the same case, in the list's order (see FrigateClient.exports)
+    val sections = remember(clips) {
+        clips.fold(mutableListOf<MutableList<FrigateAlert>>()) { runs, clip ->
+            val run = runs.lastOrNull()
+            if (run != null && run.last().caseName == clip.caseName) run.add(clip) else runs.add(mutableListOf(clip))
+            runs
+        }
+    }
+    BoxWithConstraints(modifier) {
+        // As tall as the two-row grid's tiles, with the title above
+        val tileHeight = (maxHeight - EdgePadding) / 2 - 28.dp
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.fillMaxSize().focusRestorer(),
+            verticalArrangement = Arrangement.spacedBy(PanelItemSpacing),
+        ) {
+            sections.forEach { section ->
+                item(key = "case-" + (section.first().caseName ?: "")) {
+                    Column {
+                        // Those in no case come first, without a title
+                        section.first().caseName?.let { title ->
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                modifier = Modifier.padding(start = EdgePadding, bottom = 4.dp).height(24.dp),
+                            )
+                        }
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth().height(tileHeight + TileGrowRoom * 2).focusRestorer(),
+                            contentPadding = PaddingValues(horizontal = EdgePadding, vertical = TileGrowRoom),
+                            horizontalArrangement = Arrangement.spacedBy(TileSpacing),
+                        ) {
+                            itemsIndexed(section, key = { _, clip -> clip.id }) { _, clip ->
+                                Card(
+                                    onClick = { feed.playing = clip },
+                                    modifier = Modifier.height(tileHeight).aspectRatio(16f / 9f),
+                                ) {
+                                    AlertTile(feed.client, clip, hasNoVideo = false)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -253,7 +414,8 @@ fun FrigateAlertsGrid(feed: FrigateFeed?, onSetUp: () -> Unit, modifier: Modifie
 @Composable
 fun FrigateClipPlayer(feed: FrigateFeed, minimizeStreams: Boolean) {
     feed.playing?.let { alert ->
-        val alerts = feed.alerts.orEmpty()
+        // The list it came from
+        val alerts = feed.list(alert.kind).orEmpty()
         val index = alerts.indexOfFirst { it.id == alert.id }
         ClipPlayer(
             client = feed.client,
@@ -445,7 +607,7 @@ private fun AlertTile(client: FrigateClient, alert: FrigateAlert, hasNoVideo: Bo
                 .padding(start = 10.dp, end = if (hasNoVideo) 36.dp else 10.dp, top = 6.dp, bottom = 6.dp),
         ) {
             Text(
-                listOf(alert.cameraName, alert.objects.joinToString(", ")).filter { it.isNotEmpty() }.joinToString(" · "),
+                alert.title,
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -546,7 +708,7 @@ private fun ClipPlayer(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                status = describeClipError(error)
+                status = describeClipError(error, alert)
                 AppLog.w("FrigateClip", "${alert.camera} ${alert.id}: ${error.errorCodeName}", error)
             }
         }
@@ -594,10 +756,12 @@ private fun ClipPlayer(
             )
             if (!showingVideo) Box(Modifier.fillMaxSize().background(Color.Black))
             ClipLabel(
-                "${alert.cameraName} · ${alertTime(alert)}",
+                "${alert.title} · ${alertTime(alert)}",
                 Modifier.align(Alignment.TopStart).padding(EdgePadding),
             )
             status?.let { ClipLabel(it) }
+            // Clips always play on the TV's hardware video pipeline
+            if (DebugOverlay.shown) PipelineLabel(gpu = false, Modifier.align(Alignment.TopEnd).padding(EdgePadding))
             if (newer != null) SwitchChevron("mdi:chevron-left", Modifier.align(Alignment.CenterStart))
             if (older != null) SwitchChevron("mdi:chevron-right", Modifier.align(Alignment.CenterEnd))
             if (ended) NotLiveMark(Modifier.align(Alignment.BottomEnd).padding(EdgePadding), size = 36.dp)
@@ -645,11 +809,20 @@ private fun ClipLabel(text: String, modifier: Modifier = Modifier) {
 }
 
 @OptIn(UnstableApi::class)
-private fun describeClipError(error: PlaybackException): String {
+private fun describeClipError(error: PlaybackException, alert: FrigateAlert): String {
     val http = generateSequence(error.cause) { it.cause }.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
     return when {
-        http?.responseCode == 400 || http?.responseCode == 404 -> "Frigate has no recording of this alert"
-        http != null -> "Frigate answered HTTP ${http.responseCode}"
-        else -> "Can't play this clip: ${error.errorCodeName}"
+        (http?.responseCode == 400 || http?.responseCode == 404) && alert.kind == FrigateKind.Export ->
+            "Frigate no longer has this saved clip's file (HTTP ${http.responseCode}): it was deleted from Frigate's exports."
+        http?.responseCode == 400 || http?.responseCode == 404 ->
+            "Frigate kept no video of this ${alert.kind.api}: recording is off for this camera in Frigate (record: enabled), or the video is older than Frigate keeps it (record: retain)."
+        http != null -> "Frigate answered HTTP ${http.responseCode} when asked for this clip"
+        error.errorCode in PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED..PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+            "The clip's download from Frigate stopped: the network connection failed (${error.errorCodeName})"
+        error.errorCode in PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED..PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
+            "This clip's file is damaged or not an MP4 file this TV can read (${error.errorCodeName})"
+        error.errorCode in PlaybackException.ERROR_CODE_DECODER_INIT_FAILED..PlaybackException.ERROR_CODE_DECODING_RESOURCES_RECLAIMED ->
+            "This TV can't decode this clip's video, or has no free video decoder for it (${error.errorCodeName})"
+        else -> "The TV's player refused this clip (${error.errorCodeName}). The log has the details."
     }
 }

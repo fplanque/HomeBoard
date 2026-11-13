@@ -7,5 +7,6 @@ class HomeBoardApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppLog.start(this)
+        ScreenState.watch(this)
     }
 }

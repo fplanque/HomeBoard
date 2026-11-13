@@ -57,12 +57,12 @@ fun LauncherSettingsDialog(
     catchHomeKey: Boolean,
     reopenAfterHome: Boolean,
     autoTurnedOff: Boolean,
-    showFreeMemory: Boolean,
     onCatchHomeKeyChange: (Boolean) -> Unit,
     onReopenAfterHomeChange: (Boolean) -> Unit,
-    onShowFreeMemoryChange: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
+    blackBackground: Boolean,
+    onBlackBackgroundChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val replaceHome = catchHomeKey || reopenAfterHome
@@ -74,7 +74,7 @@ fun LauncherSettingsDialog(
     val toggle = remember { FocusRequester() }
     // The item last on, to come back to from the top row
     val items = remember { ListFocus() }
-    val itemKeys = if (advanced) listOf("hours-", "hours+", "memory") else listOf("default", "catch", "reopen", "accessibility", "export", "import")
+    val itemKeys = if (advanced) listOf("hours-", "hours+") else listOf("default", "catch", "reopen", "accessibility", "gray", "black", "export", "import")
     var defaultHome by remember { mutableStateOf(context.defaultHome()) }
     val prefs = remember { LauncherPrefs(context) }
     // An option turned on, once its explanation is accepted
@@ -118,9 +118,6 @@ fun LauncherSettingsDialog(
         LaunchedEffect(Unit) { toggle.requestFocus() }
         if (advanced) {
             LauncherAdvancedSettings(
-                showFreeMemory = showFreeMemory,
-                onShowFreeMemoryChange = onShowFreeMemoryChange,
-                optionModifier = items.row("memory").ringToTop(),
                 firstModifier = Modifier.focusRequester(advancedOption).then(items.row("hours-")).ringToTop(right = false),
                 lastModifier = items.row("hours+").ringToTop(left = false),
             )
@@ -177,6 +174,21 @@ fun LauncherSettingsDialog(
             Text(if (accessibilityScreen) "Open Accessibility settings" else "Open TV settings")
         }
         MenuDivider()
+        // Only the screen's background: cards and panels keep their grey
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Background", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { onBlackBackgroundChange(false) }, modifier = items.row("gray").ringToTop(right = false)) {
+                Text(if (blackBackground) "Gray" else "✓ Gray")
+            }
+            OutlinedButton(onClick = { onBlackBackgroundChange(true) }, modifier = items.row("black").ringToTop(left = false)) {
+                Text(if (blackBackground) "✓ Black" else "Black")
+            }
+        }
+        MenuDivider()
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -221,12 +233,9 @@ private fun BuildInfo() {
     }
 }
 
-/** The app's log: how many hours it keeps, and what they take up. Then the free memory in the top bar. */
+/** The app's log: how many hours it keeps, and what they take up */
 @Composable
 private fun LauncherAdvancedSettings(
-    showFreeMemory: Boolean,
-    onShowFreeMemoryChange: (Boolean) -> Unit,
-    optionModifier: Modifier,
     firstModifier: Modifier,
     lastModifier: Modifier,
 ) {
@@ -263,14 +272,6 @@ private fun LauncherAdvancedSettings(
         "Log size: ${size?.let { Formatter.formatShortFileSize(context, it) } ?: "…"}",
         style = MaterialTheme.typography.bodyMedium,
         modifier = Modifier.padding(12.dp),
-    )
-    MenuDivider()
-    HomeOption(
-        title = "Show free memory",
-        description = "In the top bar, next to the clock",
-        checked = showFreeMemory,
-        onClick = { onShowFreeMemoryChange(!showFreeMemory) },
-        modifier = Modifier.padding(horizontal = 12.dp).then(optionModifier),
     )
 }
 

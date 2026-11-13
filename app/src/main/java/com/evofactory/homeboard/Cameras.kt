@@ -40,6 +40,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,6 +74,7 @@ import androidx.tv.material3.Card
 import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.ListItem
 import androidx.tv.material3.MaterialTheme
+import androidx.tv.material3.OutlinedButton
 import androidx.tv.material3.Text
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -286,7 +288,8 @@ fun SwitchChevron(icon: String, modifier: Modifier) {
  * many as the TV can decode at once; the others show the last picture seen when they were on the home
  * screen, with a red X. Selecting one of those takes the decoder of the playing camera selected
  * longest ago. OK picks a camera, to show full screen. [spareDecoder] plays one fewer, leaving a
- * decoder for the camera shown full screen.
+ * decoder for the camera shown full screen. The first [maxHardware] cameras with a substream, in the
+ * grid's order, use the TV's hardware video pipeline; the others are drawn by the GPU in the app's window.
  */
 @Composable
 fun CameraGrid(
@@ -294,6 +297,7 @@ fun CameraGrid(
     playSubstreams: Boolean,
     minimizeStreams: Boolean,
     spareDecoder: Boolean,
+    maxHardware: Int,
     onSelect: (Camera) -> Unit,
     onSetUp: () -> Unit,
     modifier: Modifier = Modifier,
@@ -308,6 +312,7 @@ fun CameraGrid(
         return
     }
     val liveSlots = remember { LiveSlots(maxLiveVideos()) }
+    val hardwareIds = remember(cameras, maxHardware) { hardwareTiles(cameras, maxHardware) }
     // Only once the selection stays: passing over cameras shouldn't start and stop their streams
     var selectedId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(selectedId) {
@@ -338,17 +343,22 @@ fun CameraGrid(
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             val streaming = live && liveSlots.has(camera.id, spare = if (spareDecoder) 1 else 0)
             if (streaming) {
-                CameraView(
-                    url = camera.substreamUrl,
-                    useTcp = camera.useTcp,
-                    modifier = Modifier.fillMaxSize(),
-                    compact = true,
-                    fallbackPictureUrl = camera.url,
-                    minimizeStreams = minimizeStreams,
-                    useAudio = camera.useSubstreamAudio,
-                    stretch = camera.stretchSubstream,
-                    onLiveChange = { playing = it },
-                )
+                // The kind of view can't change under a playing player: another kind starts it over
+                val hardware = camera.id in hardwareIds
+                key(hardware) {
+                    CameraView(
+                        url = camera.substreamUrl,
+                        useTcp = camera.useTcp,
+                        modifier = Modifier.fillMaxSize(),
+                        compact = true,
+                        fallbackPictureUrl = camera.url,
+                        minimizeStreams = minimizeStreams,
+                        useAudio = camera.useSubstreamAudio,
+                        onLiveChange = { playing = it },
+                        stretch = camera.stretchSubstream,
+                        gpu = !hardware,
+                    )
+                }
             } else {
                 val substreamSnapshot = cameraSnapshot(camera.substreamUrl)
                 val snapshot = substreamSnapshot ?: cameraSnapshot(camera.url)
@@ -391,6 +401,18 @@ fun CameraGrid(
 }
 
 private const val SELECTED_LIVE_DELAY_MS = 500L
+
+// The Kitchen TV's video pipeline has 3 video windows ("pq max window: 3" in its display service)
+const val MAX_HARDWARE_DEFAULT = 3
+const val MAX_HARDWARE_LIMIT = 16
+
+/**
+ * The tiles that use the TV's hardware video pipeline: the first [max] cameras with a substream in
+ * the grid's order (top left, bottom left, top of the second column…). Fixed by position, so a tile
+ * never changes pipeline, and restarts, because another one started or stopped streaming.
+ */
+internal fun hardwareTiles(cameras: List<Camera>, max: Int): Set<String> =
+    cameras.filter { it.substreamUrl.isNotEmpty() }.take(max).map { it.id }.toSet()
 
 /**
  * Who gets to play live, at most [max] less any kept spare. Free decoders go to the first to want
@@ -528,6 +550,8 @@ fun CamerasDialog(
     onChange: (List<Camera>) -> Unit,
     playSubstreams: Boolean,
     onPlaySubstreamsChange: (Boolean) -> Unit,
+    maxHardware: Int,
+    onMaxHardwareChange: (Int) -> Unit,
     minimizeStreams: Boolean,
     onMinimizeStreamsChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
@@ -560,7 +584,7 @@ fun CamerasDialog(
     fun currentItem() = when (tab) {
         CamerasTab.List -> rows.currentOrNull(cameras.map { it.id })
         CamerasTab.Screensaver -> advancedItems.current(listOf("shorter", "longer") + cameras.map { "screensaver:${it.id}" } + listOf("progress", "delay-", "delay+"))
-        CamerasTab.Advanced -> advancedItems.current(listOf("substreams", "minimize"))
+        CamerasTab.Advanced -> advancedItems.current(listOf("substreams", "minimize", "hardware-", "hardware+"))
     }
 
     LaunchedEffect(focusOn, cameras) {
@@ -620,10 +644,14 @@ fun CamerasDialog(
             CameraAdvancedSettings(
                 playSubstreams = playSubstreams,
                 onPlaySubstreamsChange = onPlaySubstreamsChange,
+                maxHardware = maxHardware,
+                onMaxHardwareChange = onMaxHardwareChange,
                 minimizeStreams = minimizeStreams,
                 onMinimizeStreamsChange = onMinimizeStreamsChange,
                 modifier = Modifier.focusRequester(advancedOption).then(advancedItems.row("substreams")).ringToTop(),
-                lastModifier = advancedItems.row("minimize").ringToTop(),
+                minimizeModifier = advancedItems.row("minimize").ringToTop(),
+                fewerModifier = advancedItems.row("hardware-").ringToTop(right = false),
+                moreModifier = advancedItems.row("hardware+").ringToTop(left = false),
             )
             return@TopDialog
         }
@@ -665,7 +693,7 @@ fun CamerasDialog(
         }
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).scrollIndicators(listState),
             contentPadding = PaddingValues(vertical = 8.dp),
         ) {
             itemsIndexed(moveOrder ?: cameras, key = { _, camera -> camera.id }) { index, camera ->
@@ -758,10 +786,14 @@ private enum class CamerasTab { List, Screensaver, Advanced }
 private fun CameraAdvancedSettings(
     playSubstreams: Boolean,
     onPlaySubstreamsChange: (Boolean) -> Unit,
+    maxHardware: Int,
+    onMaxHardwareChange: (Int) -> Unit,
     minimizeStreams: Boolean,
     onMinimizeStreamsChange: (Boolean) -> Unit,
     modifier: Modifier,
-    lastModifier: Modifier,
+    minimizeModifier: Modifier,
+    fewerModifier: Modifier,
+    moreModifier: Modifier,
 ) {
     val limits = remember {
         listOf("H.265" to MimeTypes.VIDEO_H265, "H.264" to MimeTypes.VIDEO_H264)
@@ -779,8 +811,25 @@ private fun CameraAdvancedSettings(
         description = "For older TVs",
         checked = minimizeStreams,
         onClick = { onMinimizeStreamsChange(!minimizeStreams) },
-        modifier = lastModifier,
+        modifier = minimizeModifier,
     )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 12.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Maximum simultaneous cameras on the hardware pipeline", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "On the Cameras tab. The next ones are drawn by the GPU. Full screen always uses the hardware pipeline.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(onClick = { onMaxHardwareChange((maxHardware - 1).coerceAtLeast(0)) }, modifier = fewerModifier) { Text("−") }
+        Text("$maxHardware", style = MaterialTheme.typography.titleMedium)
+        OutlinedButton(onClick = { onMaxHardwareChange((maxHardware + 1).coerceAtMost(MAX_HARDWARE_LIMIT)) }, modifier = moreModifier) { Text("+") }
+    }
     Text(
         "Maximum decoders on this TV: $limits",
         style = MaterialTheme.typography.bodyMedium,

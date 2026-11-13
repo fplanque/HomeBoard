@@ -163,6 +163,30 @@ class LauncherPrefs(context: Context) {
         set(value) = prefs.edit { putBoolean("camera_grid_live", value) }
 
     /**
+     * How many of the Cameras tab's live tiles use the TV's hardware video pipeline; the next ones are drawn
+     * by the GPU in the app's window. The Kitchen TV's pipeline has 3 video windows and left some tiles
+     * black with 8 (2026-11-06).
+     */
+    var cameraGridMaxHardware: Int
+        get() = prefs.getInt("camera_grid_max_hardware", MAX_HARDWARE_DEFAULT).coerceIn(0, MAX_HARDWARE_LIMIT)
+        set(value) = prefs.edit { putInt("camera_grid_max_hardware", value) }
+
+    /** Black behind everything instead of the dark grey; cards and panels keep their grey */
+    var blackBackground: Boolean
+        get() = prefs.getBoolean("black_background", false)
+        set(value) = prefs.edit { putBoolean("black_background", value) }
+
+    /** Which lists the Clips tab offers (Frigate dialog): alerts, detections, saved clips. None hides the tab. */
+    var clipsShown: List<FrigateKind>
+        get() = FrigateKind.entries.filter { prefs.getBoolean("clips_${it.api}", true) }
+        set(value) = prefs.edit { FrigateKind.entries.forEach { putBoolean("clips_${it.api}", it in value) } }
+
+    /** Labels every video with how it's drawn, HW (the TV's video pipeline) or GPU, and shows the free memory in the top bar */
+    var showDebugInfo: Boolean
+        get() = prefs.getBoolean("show_debug_info", false)
+        set(value) = prefs.edit { putBoolean("show_debug_info", value) }
+
+    /**
      * For older TVs: the cameras stop while a clip plays, and the clip waits until their players have
      * released. Decoders open one at a time.
      * Otherwise videos play side by side, and open together.
@@ -190,11 +214,6 @@ class LauncherPrefs(context: Context) {
     var logHoursKept: Int
         get() = prefs.getInt("log_hours_kept", LOG_HOURS_DEFAULT).coerceIn(LOG_HOURS_MIN, LOG_HOURS_MAX)
         set(value) = prefs.edit { putInt("log_hours_kept", value) }
-
-    /** Show the memory left on the TV in the top bar */
-    var showFreeMemory: Boolean
-        get() = prefs.getBoolean("show_free_memory", false)
-        set(value) = prefs.edit { putBoolean("show_free_memory", value) }
 
     /** The user accepted what the home override does, asked the first time they turn on either option */
     var homeOverrideAccepted: Boolean

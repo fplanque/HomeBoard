@@ -99,6 +99,8 @@ class CameraScreensaver : DreamService(), LifecycleOwner, SavedStateRegistryOwne
         val seconds = prefs.screensaverSeconds
         val minimizeStreams = prefs.minimizeVideoStreams
         val showProgress = prefs.screensaverShowProgress
+        // The launcher may not have run in this process yet
+        DebugOverlay.shown = prefs.showDebugInfo
         AppLog.i(TAG, "Showing ${cameras.size} cameras, $seconds s each")
         setContentView(
             ComposeView(this).apply {

@@ -413,16 +413,15 @@ fun HomeAssistantDialog(
             }
         },
         hint = when (tab) {
-            HaTab.Sensors -> "OK selects · ${selected.count { !isHaAction(it) }} chosen"
-            HaTab.Actions -> "OK: top bar → chosen → off · ${selected.count(::isHaAction)} chosen · " +
+            HaTab.Sensors -> "${selected.count { !isHaAction(it) }} selected"
+            HaTab.Actions -> "OK: top bar → chosen → off · ${selected.count(::isHaAction)} selected · " +
                 "${topBar.size} of $MAX_HA_ACTIONS in the top bar"
             HaTab.Order -> when {
                 orderRows.isEmpty() -> null
                 movingKey != null -> "Up and down move it · OK keeps it there · Back cancels"
                 else -> "OK on a card's title moves the card, OK on an item moves it within its card"
             }
-            HaTab.Dashboard -> "OK chooses what the Assistant tab shows, or turns a switch on or off · the top bar keeps your choice"
-            HaTab.Home -> "OK chooses what the Home tab shows next to the camera, or turns a switch on or off"
+            HaTab.Dashboard, HaTab.Home -> null
         },
     ) {
         when (tab) {
@@ -571,7 +570,8 @@ private fun TopDialogScope.EntityPicker(
     if (keys.isEmpty()) {
         Text("Nothing matches", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
-    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).padding(top = 4.dp)) {
+    val listState = rememberLazyListState()
+    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).padding(top = 4.dp).scrollIndicators(listState)) {
         sections.forEach { (title, items) ->
             entitySection(title, items, mark, onPress) { entity -> rows.row(entity.id).ringToTop() }
         }
@@ -662,7 +662,8 @@ private fun DashboardChoice(
     onSectionColumnsChange: (Boolean) -> Unit,
     rowModifier: (key: String) -> Modifier,
 ) {
-    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 4.dp)) {
+    val listState = rememberLazyListState()
+    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 4.dp).scrollIndicators(listState)) {
         item(key = MY_SELECTION) {
             ChoiceRow(
                 "My selection",
@@ -713,7 +714,7 @@ private const val SECTION_COLUMNS = "section_columns"
 
 /** A row to choose, with a line saying more under its title, and a check mark when [checked], or a [switch] on when it is */
 @Composable
-private fun ChoiceRow(title: String, detail: String, checked: Boolean, modifier: Modifier, switch: Boolean = false, onClick: () -> Unit) {
+internal fun ChoiceRow(title: String, detail: String, checked: Boolean, modifier: Modifier, switch: Boolean = false, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
@@ -826,7 +827,7 @@ private fun SensorOrder(
     if (rows.isEmpty()) {
         Text("Nothing chosen yet", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
     }
-    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 4.dp)) {
+    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp).padding(top = 4.dp).scrollIndicators(listState)) {
         items(rows, key = { it.key }) { row ->
             if (!row.focusable) {
                 Text(

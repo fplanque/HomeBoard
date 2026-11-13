@@ -190,6 +190,8 @@ fun AppRow(
     onOtherTileSelected: (Boolean) -> Unit,
     // Shows the "No Recent Alerts" tile in front of the apps, which isn't their first tile
     showNoAlertsTile: Boolean,
+    // Before Frigate is set up, the same tile offers to set it up
+    noAlertsLabel: String = "No Recent Alerts",
     onNoAlertsClick: () -> Unit,
     onNoAlertsSelected: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -352,6 +354,7 @@ fun AppRow(
                     item(key = NO_ALERTS_TILE_KEY) {
                         NoAlertsTile(
                             width = tileWidth,
+                            label = noAlertsLabel,
                             onClick = onNoAlertsClick,
                             modifier = Modifier
                                 .onFocusChanged { onNoAlertsSelected(it.hasFocus) }
@@ -430,9 +433,9 @@ fun showHiddenAction(showHidden: Boolean, hiddenCount: Int, onClick: () -> Unit)
     onClick = onClick,
 )
 
-/** Says Frigate has nothing to show, where the row of alerts would otherwise be above the tiles */
+/** Says Frigate has nothing to show, where the row of alerts would otherwise be above the tiles, or offers to set it up */
 @Composable
-private fun NoAlertsTile(width: Dp, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun NoAlertsTile(width: Dp, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Card(onClick = onClick, modifier = modifier.width(width).aspectRatio(16f / 9f)) {
         Column(
             modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp),
@@ -440,7 +443,7 @@ private fun NoAlertsTile(width: Dp, onClick: () -> Unit, modifier: Modifier = Mo
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             MdiIcon("mdi:cctv", size = 40.dp)
-            Text("No Recent Alerts", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
         }
     }
 }

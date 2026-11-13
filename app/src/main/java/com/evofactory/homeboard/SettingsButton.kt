@@ -39,6 +39,8 @@ fun SettingsButton(
     onOpenHomeAssistant: () -> Unit,
     onOpenFrigate: () -> Unit,
     onOpenLauncherSettings: () -> Unit,
+    showDebugInfo: Boolean,
+    onShowDebugInfoChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -68,6 +70,8 @@ fun SettingsButton(
                     MenuAction("Home Assistant", onOpenHomeAssistant),
                     MenuAction("Frigate", onOpenFrigate),
                     showHiddenAction(showHidden, hiddenCount) { onShowHiddenChange(!showHidden) },
+                    // Labels each video HW (the TV's video pipeline) or GPU, and shows the free memory in the top bar
+                    MenuAction(if (showDebugInfo) "Hide debug info" else "Display debug info") { onShowDebugInfoChange(!showDebugInfo) },
                 ),
                 onDismiss = { menuOpen = false },
                 placement = MenuPlacement.BelowAtRightMargin,

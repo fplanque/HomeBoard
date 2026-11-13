@@ -46,6 +46,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
+import androidx.tv.material3.SurfaceDefaults
+import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,6 +72,11 @@ class MainActivity : ComponentActivity() {
     private var camerasOpen by mutableStateOf(false)
     private var cameras by mutableStateOf(emptyList<Camera>())
     private var cameraGridLive by mutableStateOf(true)
+    private var clipsShown by mutableStateOf(FrigateKind.entries.toList())
+    private var blackBackground by mutableStateOf(false)
+    // What the Clips tab shows
+    private var clipsKind by mutableStateOf(FrigateKind.Alert)
+    private var cameraGridMaxHardware by mutableIntStateOf(MAX_HARDWARE_DEFAULT)
     private var minimizeVideoStreams by mutableStateOf(false)
     private var selectedCamera by mutableStateOf("")
     private var tab by mutableStateOf(HomeTab.Home)
@@ -89,7 +96,6 @@ class MainActivity : ComponentActivity() {
     private var replaceHome by mutableStateOf(false)
     private var catchHomeKey by mutableStateOf(false)
     private var reopenAfterHome by mutableStateOf(false)
-    private var showFreeMemory by mutableStateOf(false)
     private var exportOpen by mutableStateOf(false)
     private var importOpen by mutableStateOf(false)
     private var watchNext by mutableStateOf(emptyList<WatchItem>())
@@ -110,6 +116,10 @@ class MainActivity : ComponentActivity() {
         hidden = prefs.hidden
         cameras = prefs.cameras
         cameraGridLive = prefs.cameraGridLive
+        clipsShown = prefs.clipsShown
+        blackBackground = prefs.blackBackground
+        cameraGridMaxHardware = prefs.cameraGridMaxHardware
+        DebugOverlay.shown = prefs.showDebugInfo
         minimizeVideoStreams = prefs.minimizeVideoStreams
         selectedCamera = prefs.selectedCamera
         haServer = HaServer(prefs.haUrl, prefs.haToken, prefs.haRefreshToken)
@@ -122,7 +132,11 @@ class MainActivity : ComponentActivity() {
         if (!canReadWatchNext()) requestPermissions(arrayOf(READ_TV_LISTINGS), 0)
         setContent {
             MaterialTheme(colorScheme = AppColorScheme) {
-                Surface(modifier = Modifier.fillMaxSize()) {
+                // HomeBoard settings › Background
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    colors = if (blackBackground) SurfaceDefaults.colors(containerColor = Color.Black) else SurfaceDefaults.colors(),
+                ) {
                     val all = installed
                     val visible = remember(all, order, hidden) { all?.let { arrange(it, order, hidden) } }
                     val hiddenApps = remember(all, hidden) {
@@ -184,7 +198,9 @@ class MainActivity : ComponentActivity() {
                     var tilesRowSelected by remember { mutableStateOf(false) }
                     var otherTileSelected by remember { mutableStateOf(false) }
                     var noAlertsSelected by remember { mutableStateOf(false) }
-                    val showNoAlertsTile = frigateFeed?.noRecentAlerts == true && bottomRow
+                    // Before Frigate is set up, on the Home tab, the tile offers to set it up
+                    val frigateSetUpTile = frigateFeed == null && tab == HomeTab.Home
+                    val showNoAlertsTile = (frigateFeed?.noRecentAlerts == true && bottomRow) || frigateSetUpTile
                     // Worked out before the tile is removed, when focus is still known to be on it
                     val lostNoAlertsTile = remember(showNoAlertsTile) { !showNoAlertsTile && noAlertsSelected }
                     val alertsExist = frigateFeed != null && frigateFeed.rowAlerts.isNotEmpty()
@@ -239,6 +255,8 @@ class MainActivity : ComponentActivity() {
                             return true
                         }
                         colorButtonTab(event)?.let { pressed ->
+                            // The yellow button does nothing while the Clips tab is turned off
+                            if (pressed == HomeTab.Alerts && clipsShown.isEmpty()) return true
                             if (event.type == KeyEventType.KeyDown) {
                                 tab = pressed
                                 val tabFocus = when (pressed) {
@@ -288,7 +306,9 @@ class MainActivity : ComponentActivity() {
                             alertsTabFocus = alertsTabFocus,
                             assistantTabFocus = assistantTabFocus,
                             onHomeTabSelected = { homeTabSelected = it },
-                            showFreeMemory = showFreeMemory,
+                            // Part of the debug info
+                            showFreeMemory = DebugOverlay.shown,
+                            tabs = HomeTab.entries.filter { it != HomeTab.Alerts || clipsShown.isNotEmpty() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(start = EdgePadding, top = TopPadding, end = EdgePadding)
@@ -319,6 +339,11 @@ class MainActivity : ComponentActivity() {
                                 onOpenHomeAssistant = { haDialogOpen = true },
                                 onOpenFrigate = { frigateOpen = true },
                                 onOpenLauncherSettings = { launcherSettingsOpen = true },
+                                showDebugInfo = DebugOverlay.shown,
+                                onShowDebugInfoChange = {
+                                    DebugOverlay.shown = it
+                                    prefs.showDebugInfo = it
+                                },
                                 modifier = Modifier.focusRequester(cogFocus),
                             )
                         }
@@ -330,6 +355,7 @@ class MainActivity : ComponentActivity() {
                                 playSubstreams = cameraGridLive &&
                                     !(minimizeVideoStreams && (frigateFeed?.playing != null || fullScreenCamera != null)),
                                 minimizeStreams = minimizeVideoStreams,
+                                maxHardware = cameraGridMaxHardware,
                                 spareDecoder = fullScreenCamera != null,
                                 onSelect = { fullScreenCamera = it },
                                 onSetUp = { camerasOpen = true },
@@ -339,8 +365,13 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = EdgePadding).onFocusChanged { middleSelected = it.hasFocus },
                             )
                         } else if (tab == HomeTab.Alerts) {
-                            FrigateAlertsGrid(
+                            FrigateClipsTab(
                                 feed = frigateFeed,
+                                kinds = clipsShown,
+                                // The one chosen, unless the Frigate dialog has hidden it since
+                                kind = clipsKind.takeIf { it in clipsShown } ?: clipsShown.firstOrNull() ?: FrigateKind.Alert,
+                                onKindChange = { clipsKind = it },
+                                tabFocus = alertsTabFocus,
                                 // A changed certificate: its dialog again
                                 onSetUp = { if (frigateFeed?.changedCertificate != null) dismissedCertificate = null else frigateOpen = true },
                                 modifier = Modifier.weight(1f).fillMaxWidth().padding(top = EdgePadding),
@@ -419,10 +450,8 @@ class MainActivity : ComponentActivity() {
                                         .padding(start = EdgePadding, top = EdgePadding, end = EdgePadding)
                                         .onFocusChanged { middleSelected = it.hasFocus },
                                 ) {
-                                    val cameraWidth = minOf(
-                                        maxHeight * 16f / 9f,
-                                        if (sideContent) maxWidth - SidePanelWidth - EdgePadding else maxWidth,
-                                    )
+                                    // Before Home Assistant is set up, the panel's outline keeps its place
+                                    val cameraWidth = minOf(maxHeight * 16f / 9f, maxWidth - SidePanelWidth - EdgePadding)
                                     Row(horizontalArrangement = Arrangement.spacedBy(EdgePadding)) {
                                         CameraBox(cameraWidth)
                                         if (sideContent && haDisplay.homeDashboard != null) {
@@ -454,6 +483,13 @@ class MainActivity : ComponentActivity() {
                                                     modifier = Modifier.fillMaxSize(),
                                                 )
                                             }
+                                        } else {
+                                            HomeAssistantSetUpOutline(
+                                                buttonFocus = haSensorsFocus,
+                                                upFocus = networkFocus,
+                                                onSetUp = { haDialogOpen = true },
+                                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                            )
                                         }
                                     }
                                 }
@@ -519,10 +555,20 @@ class MainActivity : ComponentActivity() {
                                             onFirstTileSelected = { firstTileSelected = it },
                                             onOtherTileSelected = { otherTileSelected = it },
                                             showNoAlertsTile = showNoAlertsTile,
+                                            noAlertsLabel = if (frigateSetUpTile) "Set up Frigate" else "No Recent Alerts",
                                             onNoAlertsSelected = { noAlertsSelected = it },
-                                            onNoAlertsClick = {
-                                                tab = HomeTab.Alerts
-                                                runCatching { alertsTabFocus.requestFocus() }
+                                            onNoAlertsClick = click@{
+                                                if (frigateSetUpTile) {
+                                                    frigateOpen = true
+                                                    return@click
+                                                }
+                                                // The Clips tab on its alerts, or its first list, unless it's turned off
+                                                val kind = FrigateKind.Alert.takeIf { it in clipsShown } ?: clipsShown.firstOrNull()
+                                                if (kind != null) {
+                                                    clipsKind = kind
+                                                    tab = HomeTab.Alerts
+                                                    runCatching { alertsTabFocus.requestFocus() }
+                                                }
                                             },
                                             modifier = Modifier.onFocusChanged { if (it.hasFocus) alertsRowShown = false },
                                         ) else AppRowPlaceholder()
@@ -564,6 +610,11 @@ class MainActivity : ComponentActivity() {
                             onPlaySubstreamsChange = {
                                 cameraGridLive = it
                                 prefs.cameraGridLive = it
+                            },
+                            maxHardware = cameraGridMaxHardware,
+                            onMaxHardwareChange = {
+                                cameraGridMaxHardware = it
+                                prefs.cameraGridMaxHardware = it
                             },
                             minimizeStreams = minimizeVideoStreams,
                             onMinimizeStreamsChange = {
@@ -611,7 +662,14 @@ class MainActivity : ComponentActivity() {
                     if (frigateOpen) {
                         FrigateDialog(
                             initial = frigate,
+                            feed = frigateFeed,
                             onSave = ::saveFrigate,
+                            clipsShown = clipsShown,
+                            onClipsShownChange = {
+                                clipsShown = it
+                                prefs.clipsShown = it
+                                if (it.isEmpty() && tab == HomeTab.Alerts) tab = HomeTab.Home
+                            },
                             onDismiss = { frigateOpen = false },
                         )
                     }
@@ -628,13 +686,13 @@ class MainActivity : ComponentActivity() {
                                 prefs.reopenAfterHome = on
                                 homeOverrideChanged()
                             },
-                            showFreeMemory = showFreeMemory,
-                            onShowFreeMemoryChange = { on ->
-                                prefs.showFreeMemory = on
-                                showFreeMemory = on
-                            },
                             onExport = { exportOpen = true },
                             onImport = { importOpen = true },
+                            blackBackground = blackBackground,
+                            onBlackBackgroundChange = {
+                                blackBackground = it
+                                prefs.blackBackground = it
+                            },
                             onDismiss = { launcherSettingsOpen = false },
                         )
                     }
@@ -784,7 +842,6 @@ class MainActivity : ComponentActivity() {
         replaceHome = prefs.replaceHome
         catchHomeKey = prefs.catchHomeKey
         reopenAfterHome = prefs.reopenAfterHome
-        showFreeMemory = prefs.showFreeMemory
     }
 
     override fun onResume() {
@@ -816,6 +873,12 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         running = false
+    }
+
+    override fun onStart() {
+        // Before the cameras start, which happens just after this: the TV may be on its way to standby
+        ScreenState.refresh(this)
+        super.onStart()
     }
 
     override fun onStop() {

@@ -229,7 +229,8 @@ fun ChecklistDialog(
         if (allKeys.isEmpty()) {
             Text("Nothing here", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(12.dp))
         }
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+        val listState = rememberLazyListState()
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).scrollIndicators(listState)) {
             sections.forEach { section ->
                 item(key = section.title) {
                     Text(
@@ -551,7 +552,7 @@ private fun FileBrowser(title: String, defaultName: String?, onPick: (File) -> U
         if (current == null && roots.isEmpty()) {
             Text("No storage available on this TV", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(12.dp))
         }
-        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).scrollIndicators(listState)) {
             items(rows, key = { it.key }) { row ->
                 ListItem(
                     selected = false,

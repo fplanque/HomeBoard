@@ -51,8 +51,8 @@ enum class HomeTab(val label: String, val color: Color) {
     /** All the cameras' last pictures */
     Cameras("Cameras", Color(0xFF5FB36A)),
 
-    /** The latest Frigate alerts */
-    Alerts("Alerts", Color(0xFFD9B84A)),
+    /** Frigate's latest alerts, detections and saved clips */
+    Alerts("Clips", Color(0xFFD9B84A)),
 
     /** Every chosen Home Assistant sensor and action, in a card per room */
     Assistant("Assistant", Color(0xFF5A8FD9)),
@@ -70,6 +70,8 @@ fun HomeTopBar(
     onHomeTabSelected: (Boolean) -> Unit,
     showFreeMemory: Boolean,
     modifier: Modifier = Modifier,
+    // The Clips tab goes when the Frigate dialog has turned all its lists off
+    tabs: List<HomeTab> = HomeTab.entries,
     actions: @Composable RowScope.() -> Unit = {},
     settings: @Composable () -> Unit,
 ) {
@@ -78,7 +80,7 @@ fun HomeTopBar(
         horizontalArrangement = Arrangement.spacedBy(PanelItemSpacing),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        HomeTab.entries.forEach { entry ->
+        tabs.forEach { entry ->
             TabButton(
                 entry.label,
                 selected = entry == tab,

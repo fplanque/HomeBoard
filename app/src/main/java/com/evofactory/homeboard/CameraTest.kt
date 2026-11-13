@@ -75,7 +75,7 @@ private const val ANSWER_TIMEOUT_MS = 5_000
 private const val SAMPLE_MS = 4_000L
 private const val SAMPLE_READ_TIMEOUT_MS = 500
 
-private val GoodColor = Color(0xFF81C995)
+val GoodColor = Color(0xFF81C995)
 private val WarnColor = Color(0xFFFDD663)
 
 internal enum class Mark { Info, Good, Warn, Bad }
@@ -125,7 +125,6 @@ fun CameraTestDialog(name: String, url: String, substreamUrl: String, useAudio: 
         atTop = true,
         buttons = listOf(DialogButton("Test again", enabled = !running) { run++ }),
         contentFocus = { reportFocus },
-        hint = "Up and down scroll the report",
     ) {
         val scroll = rememberScrollState()
         val scope = rememberCoroutineScope()
@@ -145,7 +144,8 @@ fun CameraTestDialog(name: String, url: String, substreamUrl: String, useAudio: 
                     true
                 }
                 .ringToTop()
-                .focusable(),
+                .focusable()
+                .scrollIndicators(scroll),
         ) {
             Column(Modifier.verticalScroll(scroll).padding(horizontal = 12.dp)) {
                 reports.forEach { report ->

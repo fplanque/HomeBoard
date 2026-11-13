@@ -94,13 +94,20 @@ fun ConnectivityManager.ipv4Addresses(network: Network): List<Inet4Address> =
         .filterIsInstance<Inet4Address>()
         .filter { !it.isLoopbackAddress && !it.isAnyLocalAddress }
 
+/**
+ * Asks Android for the default network. While Android blocks this app's network access (Doze, in
+ * standby) it answers that there's none, so only for while the launcher is on screen.
+ */
 fun Context.readNetworkStatus(): NetworkStatus {
     val connectivity = getSystemService(ConnectivityManager::class.java)
-    val prefs = LauncherPrefs(this)
     val network = connectivity.activeNetwork
-    val capabilities = network?.let(connectivity::getNetworkCapabilities)
-    val link = network?.let(connectivity::getLinkProperties)
-    if (network == null || capabilities == null || link == null) return noNetworkStatus(prefs)
+    return networkStatus(network?.let(connectivity::getNetworkCapabilities), network?.let(connectivity::getLinkProperties))
+}
+
+/** The default network's status from what Android says about it; without [capabilities] or [link], there's none */
+fun Context.networkStatus(capabilities: NetworkCapabilities?, link: LinkProperties?): NetworkStatus {
+    val prefs = LauncherPrefs(this)
+    if (capabilities == null || link == null) return noNetworkStatus(prefs)
 
     val kind = when {
         capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> NetworkKind.Ethernet
@@ -191,7 +198,10 @@ private fun subnetMask(prefixLength: Int): String {
     return listOf(24, 16, 8, 0).joinToString(".") { (mask ushr it and 255).toString() }
 }
 
-/** Top bar button: Ethernet or Wi-Fi, crossed out and in red when the connection can't be used. Follows changes live. */
+/**
+ * Top bar button: Ethernet or Wi-Fi, crossed out and in red when the TV has no network or no address.
+ * No internet doesn't count. Follows changes live, also in the background, where it logs them.
+ */
 @Composable
 fun NetworkButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -199,19 +209,58 @@ fun NetworkButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     DisposableEffect(context) {
         val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        // Only from what the callbacks bring. Asking Android instead answers "no network" while it blocks this app's
+        // network access, as in Doze, and nothing calls back when that ends: in standby, the Kitchen TV stayed
+        // crossed out from 06:19 to 16:55 with Ethernet up all along (2026-11-06)
         val callback = object : ConnectivityManager.NetworkCallback() {
-            private fun refresh() {
-                val new = context.readNetworkStatus()
+            private var network: Network? = null
+            private var capabilities: NetworkCapabilities? = null
+            private var link: LinkProperties? = null
+            private var blocked: Boolean? = null
+
+            private fun update() {
+                val new = context.networkStatus(capabilities, link)
                 if (new.kind != status.kind || new.problem != status.problem) {
                     AppLog.i(TAG, "${new.kind.label}: ${new.problem ?: "connected"}")
                 }
                 status = new
             }
 
-            override fun onAvailable(network: Network) = refresh()
-            override fun onLost(network: Network) = refresh()
-            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = refresh()
-            override fun onLinkPropertiesChanged(network: Network, link: LinkProperties) = refresh()
+            // Its capabilities and link properties follow at once
+            override fun onAvailable(network: Network) {
+                if (network == this.network) return
+                this.network = network
+                capabilities = null
+                link = null
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                if (network != this.network) return
+                this.capabilities = capabilities
+                if (link != null) update()
+            }
+
+            override fun onLinkPropertiesChanged(network: Network, link: LinkProperties) {
+                if (network != this.network) return
+                this.link = link
+                if (capabilities != null) update()
+            }
+
+            override fun onLost(network: Network) {
+                if (network != this.network) return
+                this.network = null
+                capabilities = null
+                link = null
+                update()
+            }
+
+            // Android 10+. The network is still there: only this app can't use it for now
+            override fun onBlockedStatusChanged(network: Network, blocked: Boolean) {
+                if (blocked != this.blocked && (blocked || this.blocked != null)) {
+                    AppLog.i(TAG, if (blocked) "Android blocks HomeBoard's network access (e.g. Doze in standby)" else "Network access unblocked")
+                }
+                this.blocked = blocked
+            }
         }
         connectivity.registerDefaultNetworkCallback(callback, Handler(Looper.getMainLooper()))
         onDispose { connectivity.unregisterNetworkCallback(callback) }

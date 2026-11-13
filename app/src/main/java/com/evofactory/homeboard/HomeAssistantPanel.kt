@@ -55,6 +55,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.LocalContentColor
+import androidx.tv.material3.Button
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
@@ -429,5 +430,41 @@ fun SensorReading(id: String, entity: HaEntity?, name: String? = null, iconColor
             style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
         )
+    }
+}
+
+/**
+ * Before Home Assistant is set up: the panel's final layout, empty, in the cards' grey (an empty
+ * weather card, then a card offering to set it up), so the Home tab already looks as it will
+ */
+@Composable
+fun HomeAssistantSetUpOutline(buttonFocus: FocusRequester, upFocus: FocusRequester, onSetUp: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(96.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            MdiIcon("mdi:home-assistant", size = 40.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Your sensors, switches and weather",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp, bottom = 12.dp),
+            )
+            Button(onClick = onSetUp, modifier = Modifier.focusRequester(buttonFocus).focusProperties { up = upFocus }) {
+                Text("Set up Home Assistant")
+            }
+        }
     }
 }

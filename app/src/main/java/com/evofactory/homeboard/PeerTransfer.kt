@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -729,7 +730,8 @@ private fun PeerList(
                 modifier = Modifier.padding(12.dp),
             )
         }
-        LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+        val listState = rememberLazyListState()
+        LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp).scrollIndicators(listState)) {
             if (call != null) {
                 item(key = CALL_ROW) {
                     ListItem(
